@@ -1,323 +1,224 @@
-/* Bharat.gov — concept demo app logic */
-(function () {
-  const D = window.BHARAT_DATA;
-  const I = window.BHARAT_I18N;
-  const LANGS = window.BHARAT_LANGS;
-  let lang = localStorage.getItem("bharat_lang") || "en";
-  if (!I[lang]) lang = "en";
+/* Bharat.gov — concept demo app logic. Vanilla JS, no build. */
+(function(){
+  "use strict";
+  var D = window.BHARAT_DATA, I = window.BHARAT_I18N;
+  var LANG = localStorage.getItem("bharat_lang") || "en";
+  var FILTER = "all";
+  var CATCOLORS = {}; D.categories.forEach(function(c){ CATCOLORS[c.id]=c.color; });
 
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-  const t = (k) => (I[lang] && I[lang][k]) || I.en[k] || k;
-  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function t(k){ return (I.ui[LANG] && I.ui[LANG][k]) || I.ui.en[k] || k; }
+  function catLabel(id){ return (I.cat[id] && (I.cat[id][LANG]||I.cat[id].en)) || id; }
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 
-  /* ---------- Category colour lookup ---------- */
-  const catColor = {}; const catName = {};
-  D.categories.forEach(c => { catColor[c.id] = c.color; catName[c.id] = c.key; });
-
-  /* ---------- Render language selector ---------- */
-  function renderLangs() {
-    const sel = $("#langSelect");
-    sel.innerHTML = LANGS.map(l => `<option value="${l.code}" ${l.code === lang ? "selected" : ""}>${l.native}</option>`).join("");
+  /* ---------- render ---------- */
+  function applyStatic(){
+    var L = I.langs.find(function(x){return x.code===LANG;}) || I.langs[0];
+    document.documentElement.lang = LANG;
+    document.documentElement.dir = L.dir;
+    document.querySelectorAll("[data-t]").forEach(function(n){ n.textContent = t(n.getAttribute("data-t")); });
+    document.querySelectorAll("[data-tph]").forEach(function(n){ n.setAttribute("placeholder", t(n.getAttribute("data-tph"))); });
   }
 
-  /* ---------- Render popular chips ---------- */
-  function renderPopular() {
-    $("#popularChips").innerHTML = D.popular.map(p =>
-      `<a class="chip" href="${p.url}" target="_blank" rel="noopener">${esc(p.name)}</a>`).join("");
-  }
-
-  /* ---------- Render categories ---------- */
-  function renderCats() {
-    $("#catGrid").innerHTML = D.categories.map(c => `
-      <div class="cat reveal" style="--c:${c.color}" data-cat="${c.id}" role="button" tabindex="0">
-        <div class="icon-badge" style="--c:${c.color}">${c.icon}</div>
-        <h3>${esc(t(c.key))}</h3>
-      </div>`).join("");
-    $$("#catGrid .cat").forEach(el => {
-      const go = () => { setFilter(el.dataset.cat); document.getElementById("schemes").scrollIntoView({ behavior: "smooth" }); };
-      el.addEventListener("click", go);
-      el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  function renderCats(){
+    el("cats").innerHTML = D.categories.map(function(c){
+      return '<div class="cat" data-cat="'+c.id+'">'
+        + '<span class="bar" style="background:'+c.color+'"></span>'
+        + '<div class="ic" style="background:'+c.color+'">'+c.icon+'</div>'
+        + '<h3>'+esc(catLabel(c.id))+'</h3></div>';
+    }).join("");
+    el("cats").querySelectorAll(".cat").forEach(function(n){
+      n.onclick = function(){ FILTER = n.getAttribute("data-cat"); renderChips(); renderSchemes();
+        document.getElementById("schemes-block").scrollIntoView({behavior:"smooth"}); };
     });
   }
 
-  /* ---------- Render scheme filter buttons ---------- */
-  let activeFilter = "all";
-  function renderFilters() {
-    const all = `<button class="filter ${activeFilter === "all" ? "active" : ""}" data-f="all">${lang === "en" ? "All" : "✦"}</button>`;
-    $("#filterRow").innerHTML = all + D.categories.map(c =>
-      `<button class="filter ${activeFilter === c.id ? "active" : ""}" data-f="${c.id}">${c.icon} ${esc(t(c.key))}</button>`).join("");
-    $$("#filterRow .filter").forEach(b => b.addEventListener("click", () => setFilter(b.dataset.f)));
-  }
-  function setFilter(f) { activeFilter = f; renderFilters(); applyFilter(); }
-
-  /* ---------- Render scheme cards ---------- */
-  function renderSchemes() {
-    $("#schemeGrid").innerHTML = D.schemes.map((s, i) => `
-      <a class="scheme reveal" href="${s.url}" target="_blank" rel="noopener" data-cat="${s.cat}" data-name="${esc(s.name.toLowerCase())}">
-        <div class="top" style="background:linear-gradient(135deg, ${catColor[s.cat]}22, ${catColor[s.cat]}0d)">
-          <span class="cat-tag" style="background:${catColor[s.cat]}">${esc(t(catName[s.cat]))}</span>
-          <span>${s.emoji}</span>
-        </div>
-        <div class="body">
-          <h3>${esc(s.name)}</h3>
-          <p>${esc(s.blurb)}</p>
-          <span class="open">${esc(t("open_portal"))}</span>
-        </div>
-      </a>`).join("");
-    observeReveal();
-  }
-  function applyFilter() {
-    const q = ($("#heroSearch").value || "").trim().toLowerCase();
-    $$("#schemeGrid .scheme").forEach(el => {
-      const okCat = activeFilter === "all" || el.dataset.cat === activeFilter;
-      const okQ = !q || el.dataset.name.includes(q) || el.textContent.toLowerCase().includes(q);
-      el.hidden = !(okCat && okQ);
+  function renderChips(){
+    var chips = [{id:"all",label:"★ "+ (LANG==="en"?"All":t("nav_schemes"))}].concat(
+      D.categories.map(function(c){ return {id:c.id,label:c.icon+" "+catLabel(c.id)}; }));
+    el("chips").innerHTML = chips.map(function(c){
+      return '<button class="chip'+(FILTER===c.id?" on":"")+'" data-f="'+c.id+'">'+esc(c.label)+'</button>';
+    }).join("");
+    el("chips").querySelectorAll(".chip").forEach(function(n){
+      n.onclick = function(){ FILTER = n.getAttribute("data-f"); renderChips(); renderSchemes(); };
     });
   }
 
-  /* ---------- Render states ---------- */
-  function renderStates() {
-    $("#stateGrid").innerHTML = D.states.map(s =>
-      `<a class="state" href="https://www.google.com/search?q=${encodeURIComponent(s + " government services portal")}" target="_blank" rel="noopener">${esc(s)}</a>`).join("");
+  function renderSchemes(q){
+    q = (q||"").trim().toLowerCase();
+    var list = D.schemes.filter(function(s){
+      var okCat = FILTER==="all" || s.cat===FILTER;
+      var okQ = !q || (s.name+" "+s.blurb+" "+catLabel(s.cat)).toLowerCase().indexOf(q)>=0;
+      return okCat && okQ;
+    });
+    if(!list.length){ el("schemes").innerHTML = '<p style="color:var(--muted)">No matches — try the AI assistant.</p>'; return; }
+    el("schemes").innerHTML = list.map(function(s){
+      return '<div class="scheme">'
+        + '<div class="top"><div class="emoji">'+s.emoji+'</div><div>'
+        + '<div class="cat-tag">'+esc(catLabel(s.cat))+'</div>'
+        + '<h4>'+esc(s.name)+'</h4></div></div>'
+        + '<p>'+esc(s.blurb)+'</p>'
+        + '<div class="foot"><a href="'+s.url+'" target="_blank" rel="noopener">'+esc(t("visit"))+'</a>'
+        + '<span class="ask" data-ask="'+esc(s.name)+'">💬 '+esc(t("nav_ai"))+'</span></div></div>';
+    }).join("");
+    el("schemes").querySelectorAll(".ask").forEach(function(n){
+      n.onclick = function(){ openAI(); askAbout(n.getAttribute("data-ask")); };
+    });
   }
 
-  /* ---------- Apply i18n to static [data-i18n] nodes ---------- */
-  function applyI18n() {
-    document.documentElement.lang = lang;
-    const rtl = (LANGS.find(l => l.code === lang) || {}).rtl;
-    document.body.setAttribute("dir", rtl ? "rtl" : "ltr");
-    $$("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
-    $$("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
-    // brand
-    $("#brandName").innerHTML = `<b>${esc(t("brand"))}</b><span>${esc(t("brand2"))}</span>`;
+  function renderServices(){
+    el("services").innerHTML = D.popular.map(function(s){
+      return '<a class="svc" href="'+s.url+'" target="_blank" rel="noopener"><span class="dot"></span>'+esc(s.name)+'</a>';
+    }).join("");
+  }
+  function renderStates(){
+    el("states").innerHTML = D.states.map(function(s){ return '<div class="state">'+esc(s)+'</div>'; }).join("");
+  }
+  function renderLangSel(){
+    el("langsel").innerHTML = I.langs.map(function(l){
+      return '<option value="'+l.code+'"'+(l.code===LANG?" selected":"")+'>'+l.name+'</option>';
+    }).join("");
+    el("langsel").onchange = function(){ LANG=this.value; localStorage.setItem("bharat_lang",LANG); renderAll(); };
   }
 
-  function rerender() {
-    applyI18n(); renderCats(); renderFilters(); renderSchemes(); applyFilter();
+  function renderAll(){ applyStatic(); renderLangSel(); renderCats(); renderChips(); renderSchemes(el("q")?el("q").value:""); renderServices(); renderStates(); refreshAIChrome(); }
+
+  /* ---------- AI assistant ---------- */
+  var history = [];
+  function openAI(){ el("scrim").classList.add("open"); el("ai").classList.add("open"); setTimeout(function(){var ta=el("ai-input"); if(ta) ta.focus();},300); }
+  function closeAI(){ el("scrim").classList.remove("open"); el("ai").classList.remove("open"); }
+  function getKey(){ return localStorage.getItem("bharat_key")||""; }
+  function getModel(){ return localStorage.getItem("bharat_model")||"claude-sonnet-5"; }
+
+  function refreshAIChrome(){
+    if(el("ai-key-input")) el("ai-key-input").value = getKey();
+    if(el("model-sel")) el("model-sel").value = getModel();
+    if(el("ai-body") && !history.length) renderChat();
   }
 
-  /* ---------- Scroll reveal ---------- */
-  let io;
-  function observeReveal() {
-    if (io) io.disconnect();
-    io = new IntersectionObserver((ents) => {
-      ents.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
-    }, { threshold: .12 });
-    $$(".reveal").forEach(el => io.observe(el));
+  function bubble(role,text){
+    var d=document.createElement("div"); d.className="msg "+(role==="user"?"me":"bot"); d.textContent=text; return d;
   }
-
-  /* ==================================================================
-     AI ASSISTANT  — calls Claude (Anthropic) directly from the browser.
-     Key is user-supplied, stored only in localStorage. Streaming SSE.
-     ================================================================== */
-  const AI = {
-    key: localStorage.getItem("bharat_ai_key") || "",
-    model: localStorage.getItem("bharat_ai_model") || "claude-sonnet-5",
-    history: []
-  };
-
-  function systemPrompt() {
-    const langName = (LANGS.find(l => l.code === lang) || {}).label || "English";
-    const schemeList = D.schemes.map(s => `- ${s.name} (${s.url}): ${s.blurb}`).join("\n");
-    return `You are "Bharat AI", a warm, concise assistant on a concept portal for Indian government services (inspired by america.gov). Help citizens understand and access real Government of India schemes, documents and services.
-
-RULES:
-- Reply in ${langName} (the user's selected language). Keep answers short, friendly and practical — use simple steps and bullet points.
-- Ground answers in real Indian schemes. When relevant, name the official scheme and give its official website as a markdown link.
-- If eligibility or exact process depends on the person, say what's typical and point them to the official portal to confirm.
-- Never invent fake portals, phone numbers, or amounts. If unsure, say so and suggest myScheme.gov.in or the relevant ministry.
-- Add a one-line reminder to verify on official .gov.in sites when giving procedural steps.
-
-Reference list of key schemes you can link to:
-${schemeList}`;
-  }
-
-  // Minimal, safe markdown: links, bold, bullet lines, line breaks
-  function mdToHtml(s) {
-    let h = esc(s);
-    h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-    h = h.replace(/(^|[\s(])(https?:\/\/[^\s)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
-    h = h.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-    h = h.replace(/^\s*[-*]\s+(.*)$/gm, "• $1");
-    return h;
-  }
-
-  function addMsg(role, text) {
-    const box = $("#aiMessages");
-    const div = document.createElement("div");
-    div.className = "msg " + (role === "user" ? "user" : "bot");
-    div.innerHTML = role === "user" ? esc(text) : mdToHtml(text);
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-    return div;
-  }
-
-  function updateKeyUI() {
-    const box = $("#aiKeybox");
-    if (AI.key) box.classList.add("hidden"); else box.classList.remove("hidden");
-    $("#aiModel").value = AI.model;
-  }
-
-  async function askAI(question) {
-    if (!AI.key) { addMsg("bot", t("ai_need_key")); $("#aiKeybox").classList.remove("hidden"); return; }
-    addMsg("user", question);
-    AI.history.push({ role: "user", content: question });
-
-    // typing bubble
-    const box = $("#aiMessages");
-    const typing = document.createElement("div");
-    typing.className = "msg bot";
-    typing.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
-    box.appendChild(typing); box.scrollTop = box.scrollHeight;
-
-    let answerDiv = null, acc = "";
-    const setAnswer = (txt) => {
-      if (!answerDiv) { typing.remove(); answerDiv = addMsg("bot", ""); }
-      answerDiv.innerHTML = mdToHtml(txt);
-      box.scrollTop = box.scrollHeight;
-    };
-
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": AI.key,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: AI.model,
-          max_tokens: 1024,
-          stream: true,
-          system: systemPrompt(),
-          messages: AI.history.slice(-10)
-        })
-      });
-
-      if (!res.ok || !res.body) {
-        let detail = "";
-        try { const j = await res.json(); detail = j.error && j.error.message ? j.error.message : JSON.stringify(j); } catch (e) {}
-        typing.remove();
-        addMsg("bot", `⚠️ ${res.status} ${res.statusText}. ${detail}\n\nCheck that your Claude API key is valid and the selected model is available on your account.`);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop();
-        for (const line of lines) {
-          const s = line.trim();
-          if (!s.startsWith("data:")) continue;
-          const payload = s.slice(5).trim();
-          if (payload === "[DONE]") continue;
-          try {
-            const evt = JSON.parse(payload);
-            if (evt.type === "content_block_delta" && evt.delta && evt.delta.text) {
-              acc += evt.delta.text; setAnswer(acc);
-            }
-          } catch (e) { /* ignore keep-alives */ }
-        }
-      }
-      if (!acc) { setAnswer("…"); }
-      AI.history.push({ role: "assistant", content: acc || "…" });
-    } catch (err) {
-      typing.remove();
-      addMsg("bot", `⚠️ Couldn't reach Claude: ${err.message}. If you're behind a proxy/VPN it may block api.anthropic.com. Your key is only used from your browser.`);
+  function renderChat(){
+    var body=el("ai-body"); body.innerHTML="";
+    body.appendChild(bubble("assistant", t("ai_welcome")));
+    if(!getKey()){
+      var n=document.createElement("div"); n.className="msg bot"; n.style.background="#fff5ea"; n.style.borderColor="#ffe0bf";
+      n.textContent=t("ai_needkey"); body.appendChild(n);
     }
+    var langName=(I.langs.find(function(x){return x.code===LANG;})||{}).name||"English";
+    var sugg=document.createElement("div"); sugg.className="suggest";
+    var prompts=[
+      "How do I apply for a new passport?",
+      "Am I eligible for PM-KISAN?",
+      "How to get Ayushman Bharat health cover?",
+      "How do I download my e-Aadhaar?"
+    ];
+    sugg.innerHTML=prompts.map(function(p){return '<button data-q="'+esc(p)+'">'+esc(p)+'</button>';}).join("");
+    body.appendChild(sugg);
+    sugg.querySelectorAll("button").forEach(function(b){ b.onclick=function(){ send(b.getAttribute("data-q")); }; });
+    history.forEach(function(m){ body.appendChild(bubble(m.role, m.content)); });
+    body.scrollTop=body.scrollHeight;
+  }
+  function askAbout(name){ if(el("ai-input")){ el("ai-input").value = "How do I apply for "+name+"? Explain the steps and eligibility."; el("ai-input").focus(); } }
+
+  function systemPrompt(){
+    var langName=(I.langs.find(function(x){return x.code===LANG;})||{}).name||"English";
+    var schemes = D.schemes.map(function(s){ return "- "+s.name+" ("+s.url+"): "+s.blurb; }).join("\n");
+    return "You are Bharat AI, a friendly, concise assistant for Indian government services on a concept demo portal (Bharat.gov). "
+      + "You help citizens understand and apply for real Government of India schemes and services. "
+      + "ALWAYS reply in this language: "+langName+" (unless the user clearly writes in another language, then match theirs). "
+      + "Be practical: give step-by-step guidance, eligibility, documents needed, and the official portal link. "
+      + "Use simple language and short paragraphs or bullet points. If unsure, say so and point to the official portal. "
+      + "Add a one-line reminder that this is a concept demo and users should verify on the official site. "
+      + "Here are key schemes you can reference (name, official URL, summary):\n" + schemes;
   }
 
-  /* ---------- AI panel open/close & wiring ---------- */
-  function openAI() { $("#aiOverlay").classList.add("open"); $("#aiPanel").classList.add("open"); setTimeout(() => $("#aiInput").focus(), 200); }
-  function closeAI() { $("#aiOverlay").classList.remove("open"); $("#aiPanel").classList.remove("open"); }
-
-  function resetChat() {
-    AI.history = [];
-    $("#aiMessages").innerHTML = "";
-    addMsg("bot", t("ai_welcome"));
+  function saveKey(){
+    var v=el("ai-key-input").value.trim();
+    localStorage.setItem("bharat_key", v);
+    var btn=el("save-key"); var old=btn.textContent; btn.textContent=t("ai_saved");
+    setTimeout(function(){ btn.textContent=t("ai_save"); },1600);
+    if(!history.length) renderChat();
   }
 
-  function wireAI() {
-    $$("[data-open-ai]").forEach(b => b.addEventListener("click", openAI));
-    $("#aiClose").addEventListener("click", closeAI);
-    $("#aiOverlay").addEventListener("click", closeAI);
-
-    $("#aiSaveKey").addEventListener("click", () => {
-      const v = $("#aiKeyInput").value.trim();
-      if (!v) return;
-      AI.key = v; localStorage.setItem("bharat_ai_key", v);
-      updateKeyUI(); addMsg("bot", "✅ " + t("ai_save_key") + " ✓");
-    });
-    $("#aiModel").addEventListener("change", e => { AI.model = e.target.value; localStorage.setItem("bharat_ai_model", AI.model); });
-
-    const send = () => {
-      const v = $("#aiInput").value.trim();
-      if (!v) return;
-      $("#aiInput").value = ""; $("#aiInput").style.height = "auto";
-      askAI(v);
-    };
-    $("#aiSendBtn").addEventListener("click", send);
-    $("#aiInput").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
-    $("#aiInput").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; });
-    $("#aiClearBtn").addEventListener("click", resetChat);
-
-    $$("#aiSuggest button").forEach(b => b.addEventListener("click", () => { $("#aiInput").value = b.textContent; send(); }));
+  function send(text){
+    text = (text!=null?text:el("ai-input").value).trim();
+    if(!text) return;
+    var key=getKey();
+    var body=el("ai-body");
+    var sg=body.querySelector(".suggest"); if(sg) sg.remove();
+    history.push({role:"user",content:text});
+    body.appendChild(bubble("user",text));
+    el("ai-input").value="";
+    if(!key){
+      var w=bubble("assistant", t("ai_needkey")); body.appendChild(w); body.scrollTop=body.scrollHeight;
+      if(el("ai-key-input")) el("ai-key-input").focus();
+      return;
+    }
+    var out=bubble("assistant",""); var cur=document.createElement("span"); cur.className="cursor";
+    out.appendChild(cur); body.appendChild(out); body.scrollTop=body.scrollHeight;
+    streamClaude(key, out, cur);
   }
 
-  /* ---------- Search ---------- */
-  function wireSearch() {
-    $("#heroSearch").addEventListener("input", applyFilter);
-    $("#heroSearch").addEventListener("keydown", e => {
-      if (e.key === "Enter") { document.getElementById("schemes").scrollIntoView({ behavior: "smooth" }); }
-    });
-    $("#heroSearchBtn").addEventListener("click", () => document.getElementById("schemes").scrollIntoView({ behavior: "smooth" }));
-  }
-
-  /* ---------- Language change ---------- */
-  function wireLang() {
-    $("#langSelect").addEventListener("change", e => {
-      lang = e.target.value; localStorage.setItem("bharat_lang", lang);
-      rerender();
-      // refresh AI welcome if chat only has the welcome line
-      if (AI.history.length === 0) resetChat();
-    });
-  }
-
-  /* ---------- Ashoka Chakra (national symbol) as SVG ---------- */
-  function renderChakras() {
-    $$("[data-chakra]").forEach(el => {
-      const col = el.style.getPropertyValue("--chakra-color") || "#0A2A66";
-      let spokes = "";
-      for (let i = 0; i < 24; i++) {
-        const a = (i * 15) * Math.PI / 180;
-        const x1 = 50 + 8 * Math.cos(a), y1 = 50 + 8 * Math.sin(a);
-        const x2 = 50 + 40 * Math.cos(a), y2 = 50 + 40 * Math.sin(a);
-        spokes += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="1.6"/>`;
+  function streamClaude(key, out, cur){
+    var acc="";
+    fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{
+        "content-type":"application/json",
+        "x-api-key":key,
+        "anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"
+      },
+      body:JSON.stringify({
+        model:getModel(), max_tokens:1024, stream:true,
+        system:systemPrompt(),
+        messages:history.map(function(m){return {role:m.role,content:m.content};})
+      })
+    }).then(function(res){
+      if(!res.ok){ return res.text().then(function(tx){ throw new Error("HTTP "+res.status+": "+tx.slice(0,300)); }); }
+      var reader=res.body.getReader(), dec=new TextDecoder(), buf="";
+      function pump(){
+        return reader.read().then(function(r){
+          if(r.done){ finish(); return; }
+          buf+=dec.decode(r.value,{stream:true});
+          var lines=buf.split("\n"); buf=lines.pop();
+          lines.forEach(function(line){
+            line=line.trim(); if(!line.indexOf("data:")===0 && line.indexOf("data:")!==0) return;
+            if(line.indexOf("data:")!==0) return;
+            var payload=line.slice(5).trim(); if(!payload||payload==="[DONE]") return;
+            try{ var ev=JSON.parse(payload);
+              if(ev.type==="content_block_delta" && ev.delta && ev.delta.text){ acc+=ev.delta.text; paint(); }
+            }catch(e){}
+          });
+          return pump();
+        });
       }
-      el.innerHTML = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true">
-        <circle cx="50" cy="50" r="44" fill="none" stroke="${col}" stroke-width="4"/>
-        <circle cx="50" cy="50" r="7" fill="${col}"/>
-        ${spokes}
-      </svg>`;
-      el.style.display = "inline-block";
+      function paint(){ out.textContent=acc; out.appendChild(cur); el("ai-body").scrollTop=el("ai-body").scrollHeight; }
+      function finish(){ if(cur.parentNode) cur.remove(); out.textContent=acc||"(no response)"; history.push({role:"assistant",content:acc}); }
+      return pump();
+    }).catch(function(err){
+      if(cur.parentNode) cur.remove();
+      out.style.background="#fff0f0"; out.style.borderColor="#ffc9c9";
+      var msg=String(err.message||err);
+      if(msg.indexOf("401")>=0) msg="Your Claude API key was rejected (401). Check the key and try again.";
+      else if(msg.indexOf("Failed to fetch")>=0) msg="Network/CORS error reaching Anthropic. Check your key and connection.";
+      out.textContent="⚠️ "+msg;
     });
   }
 
-  /* ---------- Init ---------- */
-  function init() {
-    renderChakras();
-    renderLangs(); renderPopular(); renderStates();
-    rerender();
-    wireSearch(); wireLang(); wireAI();
-    updateKeyUI(); resetChat();
-    observeReveal();
-  }
-  document.addEventListener("DOMContentLoaded", init);
+  /* ---------- wire ---------- */
+  document.addEventListener("DOMContentLoaded",function(){
+    renderAll();
+    el("open-ai").onclick=openAI; el("open-ai-2") && (el("open-ai-2").onclick=openAI);
+    el("close-ai").onclick=closeAI; el("scrim").onclick=closeAI;
+    el("save-key").onclick=saveKey;
+    el("model-sel").onchange=function(){ localStorage.setItem("bharat_model",this.value); };
+    el("send").onclick=function(){ send(); };
+    el("ai-input").addEventListener("keydown",function(e){ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); }});
+    el("q").addEventListener("input",function(){ renderSchemes(this.value); });
+    el("q").addEventListener("keydown",function(e){ if(e.key==="Enter"){ var v=this.value.trim(); if(v){ openAI(); send(v); } }});
+    el("hero-img").onerror=function(){ this.style.display="none"; var f=document.querySelector(".hero-art .fallback"); if(f) f.style.display="grid"; };
+  });
 })();
